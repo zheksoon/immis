@@ -1,6 +1,6 @@
 {
   "name": "immis",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "Immutable magic in JavaScript",
   "type": "module",
   "source": "src/index.js",
@@ -22,5 +22,12 @@
   "license": "MIT",
   "peerDependencies": {
     "react": ">=18.0.0"
-  }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ]
 }

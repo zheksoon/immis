@@ -8,30 +8,30 @@ function clonePaths(state, paths) {
       return obj;
     }
 
-    let modified = obj;
+    let cloned = obj;
 
     if (!clonedPaths.has(currentPath)) {
       clonedPaths.add(currentPath);
 
       if (Array.isArray(obj)) {
-        modified = obj.slice();
+        cloned = obj.slice();
       } else {
-        modified = Object.assign({}, obj);
+        cloned = Object.assign({}, obj);
       }
     }
 
     if (index < path.length) {
       const currentKey = path[index];
 
-      modified[currentKey] = clone(
-        modified[currentKey],
+      cloned[currentKey] = clone(
+        cloned[currentKey],
         index + 1,
         path,
         currentPath + "." + currentKey
       );
     }
 
-    return modified;
+    return cloned;
   }
 
   return paths.reduce((state, path) => clone(state, 0, path, ""), state);
@@ -39,23 +39,19 @@ function clonePaths(state, paths) {
 
 const proxyCache = new WeakMap();
 
-let reportedCallbacks;
+let reportedSubscriptions;
 
-export function createStore(root, callback) {
+export function createStore(root) {
   let pathsToUpdate = [];
 
-  const callbacks = new Set();
-
-  if (callback) {
-    callbacks.add(callback);
-  }
+  const subscriptions = new Set();
 
   const scheduleUpdate = (path) => {
     if (!pathsToUpdate.length) {
       Promise.resolve().then(() => {
         root = clonePaths(root, pathsToUpdate);
         pathsToUpdate = [];
-        callbacks.forEach((cb) => cb(root));
+        subscriptions.forEach((cb) => cb(root));
       });
     }
 
@@ -63,8 +59,6 @@ export function createStore(root, callback) {
   };
 
   function wrap(obj, path) {
-    reportedCallbacks = callbacks;
-
     if (Object(obj) !== obj) {
       return obj;
     }
@@ -75,11 +69,11 @@ export function createStore(root, callback) {
 
     cached = new Proxy(obj, {
       get(target, prop, receiver) {
-        const isProto = prop === "prototype" || prop === "constructor";
+        reportedSubscriptions = subscriptions;
 
         const value = Reflect.get(target, prop, receiver);
 
-        if (isProto || typeof value === "function") {
+        if (prop === "prototype" || prop === "constructor") {
           return value;
         }
 
@@ -88,7 +82,15 @@ export function createStore(root, callback) {
       set(target, prop, value) {
         scheduleUpdate(path);
         return Reflect.set(target, prop, value);
-      }
+      },
+      defineProperty(target, prop, attributes) {
+        scheduleUpdate(path);
+        return Reflect.defineProperty(target, prop, attributes);
+      },
+      deleteProperty(target, prop) {
+        scheduleUpdate(path);
+        return Reflect.deleteProperty(target, prop);
+      },
     });
 
     proxyCache.set(obj, cached);
@@ -96,7 +98,7 @@ export function createStore(root, callback) {
     return cached;
   }
 
-  return new Proxy(
+  const store = Proxy(
     {},
     {
       get(target, prop, receiver) {
@@ -107,31 +109,77 @@ export function createStore(root, callback) {
       set(target, prop, value) {
         scheduleUpdate([]);
         return Reflect.set(root, prop, value);
-      }
+      },
+      defineProperty(target, prop, attributes) {
+        scheduleUpdate([]);
+        return Reflect.defineProperty(root, prop, attributes);
+      },
+      deleteProperty(target, prop) {
+        scheduleUpdate([]);
+        return Reflect.deleteProperty(root, prop);
+      },
+      getOwnPropertyDescriptor(target, prop) {
+        return Reflect.getOwnPropertyDescriptor(root, prop);
+      },
+      has(target, prop) {
+        return Reflect.has(root, prop);
+      },
+      ownKeys(target) {
+        return Reflect.ownKeys(root);
+      },
+      isExtensible(target) {
+        return Reflect.isExtensible(root);
+      },
+      preventExtensions(target) {
+        return Reflect.preventExtensions(root);
+      },
+      getPrototypeOf(target) {
+        return Reflect.getPrototypeOf(root);
+      },
+      setPrototypeOf(target, proto) {
+        return Reflect.setPrototypeOf(root, proto);
+      },
     }
   );
+
+  return { store, subscriptions };
 }
 
 export const useSelector = (selector) => {
-  const reportedCallbacksRef = useRef(null);
+  const selectorRef = useRef(selector);
+
+  selectorRef.current = selector;
+
+  const reportedSubscriptionsRef = useRef(null);
 
   const subscriber = useCallback((callback) => {
-    const callbacks = reportedCallbacksRef.current;
+    const subscriptions = reportedSubscriptionsRef.current;
 
-    if (!callbacks) {
+    if (!subscriptions) {
       return () => {};
     }
 
-    callbacks.add(callback);
+    let prevResult = undefined;
+
+    const callbackWithCheck = () => {
+      const result = selectorRef.current();
+
+      if (result !== prevResult) {
+        prevResult = result;
+        callback();
+      }
+    }
+
+    subscriptions.add(callbackWithCheck);
 
     return () => {
-      callbacks.delete(callback);
+      subscriptions.delete(callbackWithCheck);
     };
   }, []);
 
   const reportedSelector = () => {
     const result = selector();
-    reportedCallbacksRef.current = reportedCallbacks;
+    reportedSubscriptionsRef.current = reportedSubscriptions;
     return result;
   };
 
