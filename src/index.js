@@ -98,7 +98,7 @@ export function createStore(root) {
     return cached;
   }
 
-  const store = Proxy(
+  const store = new Proxy(
     {},
     {
       get(target, prop, receiver) {

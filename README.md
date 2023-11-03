@@ -14,7 +14,7 @@
 - 📦 **Immutability** - always get a new immutable object when the state is updated.
 - 📚 **Batching** - all state mutations are batched, so the immutable objects are cloned only once.
 - 🪝 **Single hook** - `useSelector` React hook for using the immutable state in components.
-- 🎈 **Tiny** - only ~1KB bytes gzipped.
+- 🎈 **Tiny** - only ~1KB gzipped.
 
 ## Installation
 
@@ -47,10 +47,14 @@ const Counter = ({ counter }) => {
   );
 };
 
-render(<Counter counter={store} />, document.getElementById("root"));
+root.render(<Counter counter={store} />);
 ```
 
+[Codesandbox](https://codesandbox.io/s/immis-counter-k5m37v)
+
 ### Multiple counters:
+
+It uses the `Counter` component from the example above.
 
 ```js
 import { createStore, useSelector } from "immis";
@@ -74,8 +78,16 @@ const Counters = () => {
   );
 };
 
-render(<Counters />, document.getElementById("root"));
+root.render(<Counters />);
 ```
+
+[Codesandbox](https://codesandbox.io/s/immis-counter-list-h7x6nc)
+
+### Todo list with filter:
+
+An advanced example of Immis capabilities.
+
+[Codesandbox](https://codesandbox.io/s/immis-todo-list-qqqq73)
 
 ## Author
 
