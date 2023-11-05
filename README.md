@@ -5,7 +5,9 @@
     <hr>
 </p>
 
-**Immis** is a ~1KB library for managing immutable state in React applications. It offers a simple API for creating and updating immutable state, and a React hook for using it in components. It's main purpose is to be used as a state management library for small React applications, or as a replacement for bulky Redux or Immer libraries.
+**Immis** is a **~1KB** library designed for managing immutable state in React applications. Its primary role is to be  a state management library for small React applications, offering a lightweight alternative to bulky Redux or Immer libraries.
+
+Why **Immis**? The answer is short - **magic**. It allows you to use the immutable state as if it was mutable, without any boilerplate code and limitations. You can directly subscribe to state updates, or utilize the useSelector hook in your React components.
 
 ## Features:
 
@@ -14,7 +16,7 @@
 - 📦 **Immutability** - always get a new immutable object when the state is updated.
 - 📚 **Batching** - all state mutations are batched, so the immutable objects are cloned only once.
 - 🪝 **Single hook** - `useSelector` React hook for using the immutable state in components.
-- 🎈 **Tiny** - only ~1KB gzipped.
+- 🎈 **Tiny** - less than **1KB** gzipped.
 
 ## Installation
 
@@ -26,16 +28,11 @@ yarn add immis
 
 ## Introduction
 
-Managing immutable state in a React application isnt's that simple. You have to create a new immutable object every time you want to update the state, and it's not always easy to do. 
-For example, if you want to update a deeply nested object, you have to clone all the parent objects, and it's not always clear how to do it. 
-That's where **Immis** comes in. It allows you to use the immutable state as if it was mutable. 
-You can update the state directly, and **Immis** will take care of cloning the objects for you.
+Managing immutable state in a React application isn't simple. You need to create a new immutable object every time you update the state, and it's not always easy. For example, to update a deeply nested object, cloning all the parent objects is necessary, which can be cumbersome. This is where **Immis** steps in. It enables you to work with immutable state as if it were mutable. After each update, **Immis** takes care of cloning the changed objects for you, maintaining the state's immutability.
 
-Also, Redux's event-sourcing isn't always needed for small applications. 
-It's much easier to use a mutable state, and **Immis** allows you to do it.
+Furthermore, for small applications, the event-sourcing provided by Redux may be unnecessary. Mutating the state directly is much simpler, and **Immis** facilitates this process.
 
-**Immis** API is very simple: you create a store, and then you can update it directly. 
-You can subscribe to the store updates using `subscriptions` Set object returned by `createStore` function:  
+The **Immis** API is straightforward: create a store, and then update it directly. You can subscribe to store updates using the subscriptions Set object returned by the createStore function:
 
 ```js
 import { createStore, useSelector } from "immis";
@@ -50,7 +47,7 @@ store.count += 1; // the subscriptions will be notified with the new store objec
 store.count += 1; // changes to count are batched untill the end of the current microtask
 ```
 
-Store can consist of aritrary nested objects and arrays, and any built-in methods can be used to update it:
+A store can consist of arbitrarily nested objects and arrays, and you can use any built-in methods to update it.
 
 ```js
 const { store } = createStore({ todos: [{ text: 'hello', done: false }] });
@@ -62,9 +59,11 @@ store.todos.splice(0, 1);
 store.todos = store.todos.filter(todo => !todo.done);
 ```
 
-The only rule **Immis** has is that all objects in the state tree should be unique, i.e. one object should not be a child of multiple parent objects.
+The only rule for **Immis** is that every object in the state tree must be unique; in other words, you cannot have one object as a child of multiple parent objects.
 
-You can also use the `useSelector` React hook to subscribe to the store updates in components. It will trigger a re-render when the selected part of the store changes:
+### Using with React
+
+Use the `useSelector` hook to subscribe a component to store updates, which will trigger a re-render whenever the selected part of the store changes:
 
 ```js
 import { useSelector } from "immis";
@@ -75,7 +74,7 @@ const Counter = () => {
 }
 ```
 
-Note that the function in `useSelector` hook does not take any arguments and can access any part of the store:
+Note that the selector function you pass to the `useSelector`` hook takes no arguments and has access to any part of the store:
 
 ```js
 const TodoList = () => {
@@ -93,8 +92,7 @@ const Todo = ({ todo }) => {
 }
 ```
 
-**Important note:** as the data in the store is immutable, memoization is often needed to avoid unnecessary re-renders.
-In the example above, all `Todo` components will re-render every time the `TodoList` component re-renders, even if the `todo.text` value hasn't changed. To avoid this, use `React.memo` wrapper:
+**Important note:** Since the store's data is immutable, you frequently need memoization to prevent unnecessary re-renders. In the given example, all `Todo` components re-render with every `TodoList` re-render, regardless of changes in the `todo.text` value. Use the `React.memo` wrapper to circumvent this:
 
 ```js
 const Todo = React.memo(({ todo }) => {
@@ -105,7 +103,7 @@ const Todo = React.memo(({ todo }) => {
 });
 ```
 
-And... That's all! Now you know everything you need to use **Immis** in your application.
+And... That's all! Now you know everything you need to use **Immis** in your application!
 
 ## Examples
 
@@ -259,10 +257,30 @@ An advanced example of Immis capabilities.
 
 ## Under the hood
 
-**Immis** uses [Proxy](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy) to intercept all store updates. 
-When you update the store, **Immis** clones the updated object and all its parents, and then replaces the old objects with the new ones. Each `Proxy` is memoized in a `WeakMap`, so access to the same object is very fast. Proxies are created lazily, so if you don't access some part of the store, it won't be wrapped. This allows not to "infect" the newely created objects with proxies, and to keep the performance high.
+**Immis** uses [Proxy](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy) to intercept all updates to the store. When you update the store, **Immis** clones the updated object along with its ancestors before replacing the old objects with the new ones. Each `Proxy` is memoized in a `WeakMap` for fast access to the same object. Proxies are created lazily; parts of the store not accessed aren't wrapped, avoiding unnecessary "infection" of newly created objects with proxies and maintaining high performance.
 
-As built-in array method can write to the object multiple times, batching is needed to make sure that the object is cloned only once. **Immis** uses `Promise.resolve().then()` to batch all updates until the end of the current microtask.
+The only operation that is done ahead of time is populating parents tree. This is needed to effictient cloning of the updated object with all its ancestors, and it enabled advanced use cases like the one in the example below:
+
+```js
+
+const { store } = createStore({ todos: [{ text: 'hello' }] });
+
+const todo = store.todos[0];
+
+todo.text = 'bye';
+
+console.log(store.todos); // [  text:'bye' }]
+
+await Promise.resolve();
+
+store.todos.pop();
+
+todo.text = 'world';  // the todo does not exist in the store anymore
+
+console.log(store.todos); // []
+```
+
+As built-in array methods may write to the object multiple times, batching is needed to make sure that the object is cloned only once. **Immis** uses `Promise.resolve().then()` to batch all updates until the end of the current microtask.
 
 ## Author
 

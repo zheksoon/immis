@@ -1,10 +1,5 @@
-type Listener<T> = (newStore: T) => void;
-
-type Store<T> = {
-  store: T;
-  subscribers: Set<Listener<T>>;
+export function createStore(root: any): {
+    store: {};
+    subscriptions: Set<any>;
 };
-
-export declare function createStore<T>(root: T): Store<T>;
-
-export declare function useSelector<T>(selector: () => T): T;
+export function useSelector(selector: any): any;

@@ -1,121 +1,205 @@
 import { useCallback, useRef, useSyncExternalStore } from "react";
 
-function clonePaths(state, paths) {
-  const clonedPaths = new Set();
-
-  function clone(obj, index, path, currentPath) {
-    if (Object(obj) !== obj) {
-      return obj;
-    }
-
-    let cloned = obj;
-
-    if (!clonedPaths.has(currentPath)) {
-      clonedPaths.add(currentPath);
-
-      if (Array.isArray(obj)) {
-        cloned = obj.slice();
-      } else {
-        cloned = Object.assign({}, obj);
-      }
-    }
-
-    if (index < path.length) {
-      const currentKey = path[index];
-
-      cloned[currentKey] = clone(
-        cloned[currentKey],
-        index + 1,
-        path,
-        currentPath + "." + currentKey
-      );
-    }
-
-    return cloned;
-  }
-
-  return paths.reduce((state, path) => clone(state, 0, path, ""), state);
+function clone(obj) {
+  return Array.isArray(obj) ? obj.slice() : Object.assign({}, obj);
 }
 
+function updateParents(objects, recursive) {
+  const updated = new Set();
+
+  function update(obj) {
+    if (Array.isArray(obj)) {
+      obj.forEach((child, idx) => {
+        if (isPrimitive(child)) return;
+
+        child = unwrapMap.get(child) || child;
+
+        if (updated.has(child)) return;
+
+        parentsMap.set(child, { p: obj, k: idx });
+
+        updated.add(child);
+
+        if (recursive) update(child);
+      });
+    } else {
+      Object.keys(obj).forEach((key) => {
+        let child = obj[key];
+
+        if (isPrimitive(child)) return;
+
+        child = unwrapMap.get(child) || child;
+
+        if (updated.has(child)) return;
+
+        parentsMap.set(child, { p: obj, k: key });
+
+        updated.add(child);
+
+        if (recursive) update(child);
+      });
+    }
+  }
+
+  objects.forEach((obj) => {
+    update(obj);
+  });
+}
+
+function performUpdates(oldRoot, objects) {
+  const clones = new Map();
+  let root = oldRoot;
+
+  objects.forEach((obj) => {
+    const path = [];
+    let parentInfo;
+    let prevObj;
+
+    while ((parentInfo = parentsMap.get(obj))) {
+      prevObj = obj;
+
+      const { p, k } = parentInfo;
+
+      if (p && p[k] !== obj) {
+        return;
+      }
+
+      path.push([obj, k]);
+
+      obj = p;
+    }
+
+    if (prevObj !== oldRoot) return;
+
+    let p, clonedParent;
+
+    while ((p = path.pop())) {
+      const [obj, prop] = p;
+
+      const cloned = clones.get(obj) || clone(obj);
+
+      clones.set(obj, cloned);
+
+      if (clonedParent) {
+        clonedParent[prop] = cloned;
+      } else {
+        root = cloned;
+      }
+
+      clonedParent = cloned;
+    }
+  });
+
+  updateParents(clones, false);
+
+  parentsMap.set(root, { p: null, k: null });
+
+  return root;
+}
+
+const isPrimitive = (obj) => Object(obj) !== obj;
+
 const proxyCache = new WeakMap();
+const parentsMap = new WeakMap();
+const unwrapMap = new WeakMap();
 
 let reportedSubscriptions;
 
 export function createStore(root) {
-  let pathsToUpdate = [];
-
+  const objectsToUpdate = new Set();
   const subscriptions = new Set();
 
-  const scheduleUpdate = (path) => {
-    if (!pathsToUpdate.length) {
+  const scheduleUpdate = (obj) => {
+    if (!objectsToUpdate.size) {
       Promise.resolve().then(() => {
-        root = clonePaths(root, pathsToUpdate);
-        pathsToUpdate = [];
-        subscriptions.forEach((cb) => cb(root));
+        updateParents(objectsToUpdate, true);
+
+        const newRoot = performUpdates(root, objectsToUpdate);
+
+        if (newRoot !== root) {
+          root = newRoot;
+          subscriptions.forEach((cb) => cb(newRoot));
+        }
+
+        objectsToUpdate.clear();
       });
     }
 
-    pathsToUpdate.push(path);
+    objectsToUpdate.add(obj);
   };
 
-  function wrap(obj, path) {
-    if (Object(obj) !== obj) {
-      return obj;
-    }
+  function wrap(obj) {
+    if (isPrimitive(obj)) return obj;
 
-    let cached = proxyCache.get(obj);
+    obj = unwrapMap.get(obj) || obj;
 
-    if (cached) return cached;
+    let proxy = proxyCache.get(obj);
 
-    cached = new Proxy(obj, {
+    if (proxy) return proxy;
+    
+    proxy = new Proxy(obj, {
       get(target, prop, receiver) {
         reportedSubscriptions = subscriptions;
 
-        const value = Reflect.get(target, prop, receiver);
+        const value = Reflect.get(obj, prop, receiver);
 
-        if (prop === "prototype" || prop === "constructor") {
+        if (
+          prop === "prototype" ||
+          prop === "constructor" ||
+          typeof value === "function"
+        ) {
           return value;
         }
 
-        return wrap(value, path.concat(prop));
+        return wrap(value);
       },
       set(target, prop, value) {
-        scheduleUpdate(path);
-        return Reflect.set(target, prop, value);
+        scheduleUpdate(obj);
+
+        if (!isPrimitive(value)) {
+          value = unwrapMap.get(value) || value;
+        }
+
+        return Reflect.set(obj, prop, value);
       },
       defineProperty(target, prop, attributes) {
-        scheduleUpdate(path);
+        scheduleUpdate(obj);
         return Reflect.defineProperty(target, prop, attributes);
       },
       deleteProperty(target, prop) {
-        scheduleUpdate(path);
+        scheduleUpdate(obj);
         return Reflect.deleteProperty(target, prop);
       },
     });
 
-    proxyCache.set(obj, cached);
+    proxyCache.set(obj, proxy);
+    unwrapMap.set(proxy, obj);
 
-    return cached;
+    return proxy;
   }
+
+  updateParents([root], true);
+  
+  parentsMap.set(root, { p: null, k: null });
 
   const store = new Proxy(
     {},
     {
       get(target, prop, receiver) {
-        const wrapped = wrap(root, []);
+        const wrapped = wrap(root);
 
         return Reflect.get(wrapped, prop, receiver);
       },
       set(target, prop, value) {
-        scheduleUpdate([]);
+        scheduleUpdate(root);
         return Reflect.set(root, prop, value);
       },
       defineProperty(target, prop, attributes) {
-        scheduleUpdate([]);
+        scheduleUpdate(root);
         return Reflect.defineProperty(root, prop, attributes);
       },
       deleteProperty(target, prop) {
-        scheduleUpdate([]);
+        scheduleUpdate(root);
         return Reflect.deleteProperty(root, prop);
       },
       getOwnPropertyDescriptor(target, prop) {
@@ -168,7 +252,7 @@ export const useSelector = (selector) => {
         prevResult = result;
         callback();
       }
-    }
+    };
 
     subscriptions.add(callbackWithCheck);
 
