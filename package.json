@@ -1,7 +1,7 @@
 {
   "name": "immis",
-  "version": "0.2.0",
-  "description": "Immutable magic in JavaScript",
+  "version": "0.3.0",
+  "description": "1KB immutable magic for React 🪄",
   "type": "module",
   "source": "src/index.js",
   "types": "src/index.d.ts",
