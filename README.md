@@ -5,6 +5,11 @@
     <hr>
 </p>
 
+<p align="center">
+    <img src="https://img.shields.io/bundlephobia/minzip/immis" alt="minzip size" />
+    <img alt="GitHub" src="https://img.shields.io/github/license/zheksoon/immis" />
+</p>
+
 **Immis** is a **~1KB** library designed for managing immutable state in React applications. It's designed to be a state management library for small React applications, offering a lightweight alternative to bulky Redux or Immer libraries.
 
 Why **Immis**? The answer is short - **magic**. It allows you to use the immutable state as if it was mutable, without any boilerplate code and limitations. You can directly subscribe to state updates, or utilize the useSelector hook in your React components.
@@ -16,7 +21,7 @@ Why **Immis**? The answer is short - **magic**. It allows you to use the immutab
 - 📦 **Immutability** - always get a new immutable object when the state is updated.
 - 📚 **Batching** - all state mutations are batched, so the immutable objects are cloned only once.
 - 🪝 **Single hook** - `useSelector` React hook for using the immutable state in components.
-- 🎈 **Tiny** - less than **1KB** gzipped.
+- 🎈 **Tiny** - just around **1KB** gzipped.
 
 ## Installation
 
