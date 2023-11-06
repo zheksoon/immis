@@ -1,169 +1,160 @@
 import { useCallback, useRef, useSyncExternalStore } from "react";
 
-function clone(obj) {
-  return Array.isArray(obj) ? obj.slice() : Object.assign({}, obj);
+function isPrimitive(value) {
+  return value === null || typeof value !== "object";
 }
 
-function updateParents(objects, recursive) {
-  const updated = new Set();
-
-  function update(obj) {
-    if (Array.isArray(obj)) {
-      obj.forEach((child, idx) => {
-        if (isPrimitive(child)) return;
-
-        child = unwrapMap.get(child) || child;
-
-        if (updated.has(child)) return;
-
-        parentsMap.set(child, { p: obj, k: idx });
-
-        updated.add(child);
-
-        if (recursive) update(child);
-      });
-    } else {
-      Object.keys(obj).forEach((key) => {
-        let child = obj[key];
-
-        if (isPrimitive(child)) return;
-
-        child = unwrapMap.get(child) || child;
-
-        if (updated.has(child)) return;
-
-        parentsMap.set(child, { p: obj, k: key });
-
-        updated.add(child);
-
-        if (recursive) update(child);
-      });
-    }
-  }
-
-  objects.forEach((obj) => {
-    update(obj);
-  });
+function unwrap(obj) {
+  return unwrapMap.get(obj) || obj;
 }
 
-function performUpdates(oldRoot, objects) {
+function clone(value) {
+  return Array.isArray(value) ? value.slice() : Object.assign({}, value);
+}
+
+function clonePaths(state, objectesToUpdate) {
   const clones = new Map();
-  let root = oldRoot;
+  const root = clone(state);
 
-  objects.forEach((obj) => {
-    const path = [];
-    let parentInfo;
-    let prevObj;
+  let wasUpdated = false;
 
-    while ((parentInfo = parentsMap.get(obj))) {
-      prevObj = obj;
+  objectesToUpdate.forEach((obj) => {
+    const path = pathMap.get(obj);
 
-      const { p, k } = parentInfo;
+    let finalObj = path.reduce(
+      (acc, key) => (isPrimitive(acc) ? acc : acc[key]),
+      state
+    );
 
-      if (p && p[k] !== obj) {
-        return;
-      }
-
-      path.push([obj, k]);
-
-      obj = p;
+    if (unwrap(finalObj) !== obj) {
+      return;
     }
 
-    if (prevObj !== oldRoot) return;
+    let parent = root;
 
-    let p, clonedParent;
-
-    while ((p = path.pop())) {
-      const [obj, prop] = p;
-
+    path.forEach((key) => {
+      const obj = parent[key];
+      const currentPath = pathMap.get(obj);
       const cloned = clones.get(obj) || clone(obj);
 
+      parent[key] = cloned;
+      parent = cloned;
+
       clones.set(obj, cloned);
+      pathMap.set(cloned, currentPath);
+    });
 
-      if (clonedParent) {
-        clonedParent[prop] = cloned;
-      } else {
-        root = cloned;
-      }
-
-      clonedParent = cloned;
-    }
+    wasUpdated = true;
   });
 
-  updateParents(clones, false);
+  if (wasUpdated) {
+    return root;
+  }
 
-  parentsMap.set(root, { p: null, k: null });
-
-  return root;
+  return state;
 }
 
-const isPrimitive = (obj) => Object(obj) !== obj;
+function updatePath(obj, parent, parentKey) {
+  if (isPrimitive(obj)) {
+    return;
+  }
+
+  const parentPath = pathMap.get(parent);
+
+  if (!parentPath) {
+    return;
+  }
+
+  const path = parent ? parentPath.concat(parentKey) : [];
+
+  obj = unwrap(obj);
+
+  pathMap.set(obj, path);
+
+  if (Array.isArray(obj)) {
+    obj.forEach((item, index) => updatePath(item, obj, index));
+  } else {
+    Object.keys(obj).forEach((key) => updatePath(obj[key], obj, key));
+  }
+}
 
 const proxyCache = new WeakMap();
-const parentsMap = new WeakMap();
+const pathMap = new WeakMap();
 const unwrapMap = new WeakMap();
 
 let reportedSubscriptions;
 
 export function createStore(root) {
-  const objectsToUpdate = new Set();
+  const objectesToUpdate = new Set();
+
   const subscriptions = new Set();
 
   const scheduleUpdate = (obj) => {
-    if (!objectsToUpdate.size) {
+    if (!objectesToUpdate.size) {
       Promise.resolve().then(() => {
-        updateParents(objectsToUpdate, true);
-
-        const newRoot = performUpdates(root, objectsToUpdate);
+        const newRoot = clonePaths(root, objectesToUpdate);
 
         if (newRoot !== root) {
           root = newRoot;
           subscriptions.forEach((cb) => cb(newRoot));
         }
-
-        objectsToUpdate.clear();
+        
+        objectesToUpdate.clear();
       });
     }
 
-    objectsToUpdate.add(obj);
+    objectesToUpdate.add(obj);
   };
 
-  function wrap(obj) {
-    if (isPrimitive(obj)) return obj;
+  function wrap(obj, parent, key) {
+    if (isPrimitive(obj)) {
+      return obj;
+    }
 
-    obj = unwrapMap.get(obj) || obj;
+    obj = unwrap(obj);
 
-    let proxy = proxyCache.get(obj);
+    let cached = proxyCache.get(obj);
 
-    if (proxy) return proxy;
-    
-    proxy = new Proxy(obj, {
+    if (cached) return cached;
+
+    cached = new Proxy(obj, {
       get(target, prop, receiver) {
         reportedSubscriptions = subscriptions;
 
-        const value = Reflect.get(obj, prop, receiver);
+        const value = Reflect.get(target, prop, receiver);
 
         if (
+          isPrimitive(value) ||
+          typeof value === "function" ||
           prop === "prototype" ||
-          prop === "constructor" ||
-          typeof value === "function"
+          prop === "constructor"
         ) {
           return value;
         }
 
-        return wrap(value);
+        return wrap(value, obj, prop);
       },
       set(target, prop, value) {
         scheduleUpdate(obj);
 
         if (!isPrimitive(value)) {
-          value = unwrapMap.get(value) || value;
+          value = unwrap(value);
+          updatePath(value, target, prop);
         }
 
-        return Reflect.set(obj, prop, value);
+        return Reflect.set(target, prop, value);
       },
       defineProperty(target, prop, attributes) {
         scheduleUpdate(obj);
+
+        let value = attributes.value;
+
+        if (!isPrimitive(value)) {
+          value = unwrap(value);
+          attributes.value = value;
+          updatePath(value, target, prop);
+        }
+
         return Reflect.defineProperty(target, prop, attributes);
       },
       deleteProperty(target, prop) {
@@ -172,31 +163,37 @@ export function createStore(root) {
       },
     });
 
-    proxyCache.set(obj, proxy);
-    unwrapMap.set(proxy, obj);
+    proxyCache.set(obj, cached);
+    unwrapMap.set(cached, obj);
 
-    return proxy;
+    const parentPath = pathMap.get(parent);
+
+    pathMap.set(obj, parentPath ? parentPath.concat(key) : []);
+
+    return cached;
   }
-
-  updateParents([root], true);
-  
-  parentsMap.set(root, { p: null, k: null });
 
   const store = new Proxy(
     {},
     {
       get(target, prop, receiver) {
-        const wrapped = wrap(root);
+        const wrapped = wrap(root, null, null);
 
         return Reflect.get(wrapped, prop, receiver);
       },
       set(target, prop, value) {
         scheduleUpdate(root);
-        return Reflect.set(root, prop, value);
+
+        const wrapped = wrap(root, null, null);
+
+        return Reflect.set(wrapped, prop, value);
       },
       defineProperty(target, prop, attributes) {
         scheduleUpdate(root);
-        return Reflect.defineProperty(root, prop, attributes);
+
+        const wrapped = wrap(root, null, null);
+
+        return Reflect.defineProperty(wrapped, prop, attributes);
       },
       deleteProperty(target, prop) {
         scheduleUpdate(root);
@@ -230,42 +227,26 @@ export function createStore(root) {
 }
 
 export const useSelector = (selector) => {
+  const reportedSubscriptionsRef = useRef(null);
   const selectorRef = useRef(selector);
 
   selectorRef.current = selector;
 
-  const reportedSubscriptionsRef = useRef(null);
-
   const subscriber = useCallback((callback) => {
-    const subscriptions = reportedSubscriptionsRef.current;
+    const subscriptions = reportedSubscriptionsRef.current || new Set();
 
-    if (!subscriptions) {
-      return () => {};
-    }
-
-    let prevResult = undefined;
-
-    const callbackWithCheck = () => {
-      const result = selectorRef.current();
-
-      if (result !== prevResult) {
-        prevResult = result;
-        callback();
-      }
-    };
-
-    subscriptions.add(callbackWithCheck);
+    subscriptions.add(callback);
 
     return () => {
-      subscriptions.delete(callbackWithCheck);
+      subscriptions.delete(callback);
     };
   }, []);
 
-  const reportedSelector = () => {
-    const result = selector();
+  const reportedSelector = useCallback(() => {
+    const result = selectorRef.current();
     reportedSubscriptionsRef.current = reportedSubscriptions;
     return result;
-  };
+  }, []);
 
   return useSyncExternalStore(subscriber, reportedSelector);
 };
