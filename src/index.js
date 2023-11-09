@@ -1,95 +1,95 @@
 import { useCallback, useRef, useSyncExternalStore } from "react";
 
-function isPrimitive(value) {
-  return value === null || typeof value !== "object";
-}
+const unwrapMap = new WeakMap();
 
 function unwrap(obj) {
   return unwrapMap.get(obj) || obj;
+}
+
+function isPrimitive(value) {
+  return value === null || typeof value !== "object";
 }
 
 function clone(value) {
   return Array.isArray(value) ? value.slice() : Object.assign({}, value);
 }
 
-function clonePaths(state, objectesToUpdate) {
-  const clones = new Map();
-  const root = clone(state);
-
-  let wasUpdated = false;
-
-  objectesToUpdate.forEach((obj) => {
-    const path = pathMap.get(obj);
-
-    let finalObj = path.reduce(
-      (acc, key) => (isPrimitive(acc) ? acc : acc[key]),
-      state
-    );
-
-    if (unwrap(finalObj) !== obj) {
-      return;
-    }
-
-    let parent = root;
-
-    path.forEach((key) => {
-      const obj = parent[key];
-      const currentPath = pathMap.get(obj);
-      const cloned = clones.get(obj) || clone(obj);
-
-      parent[key] = cloned;
-      parent = cloned;
-
-      clones.set(obj, cloned);
-      pathMap.set(cloned, currentPath);
-    });
-
-    wasUpdated = true;
-  });
-
-  if (wasUpdated) {
-    return root;
-  }
-
-  return state;
-}
-
-function updatePath(obj, parent, parentKey) {
-  if (isPrimitive(obj)) {
-    return;
-  }
-
-  const parentPath = pathMap.get(parent);
-
-  if (!parentPath) {
-    return;
-  }
-
-  const path = parent ? parentPath.concat(parentKey) : [];
-
-  obj = unwrap(obj);
-
-  pathMap.set(obj, path);
-
-  if (Array.isArray(obj)) {
-    obj.forEach((item, index) => updatePath(item, obj, index));
-  } else {
-    Object.keys(obj).forEach((key) => updatePath(obj[key], obj, key));
-  }
-}
-
-const proxyCache = new WeakMap();
-const pathMap = new WeakMap();
-const unwrapMap = new WeakMap();
-
 let reportedSubscriptions;
 
 export function createStore(root) {
-  const objectesToUpdate = new Set();
+  const proxyCache = new WeakMap();
+  const pathMap = new WeakMap();
 
+  const objectesToUpdate = new Set();
   const subscriptions = new Set();
 
-  const scheduleUpdate = (obj) => {
+  function clonePaths(state, objectesToUpdate) {
+    const clones = new Map();
+    const root = clone(state);
+  
+    let wasUpdated = false;
+  
+    objectesToUpdate.forEach((obj) => {
+      const path = pathMap.get(obj);
+  
+      let finalObj = path.reduce(
+        (acc, key) => (isPrimitive(acc) ? acc : acc[key]),
+        state
+      );
+  
+      if (unwrap(finalObj) !== obj) {
+        return;
+      }
+  
+      let parent = root;
+  
+      path.forEach((key) => {
+        const obj = parent[key];
+        const currentPath = pathMap.get(obj);
+        const cloned = clones.get(obj) || clone(obj);
+  
+        parent[key] = cloned;
+        parent = cloned;
+  
+        clones.set(obj, cloned);
+        pathMap.set(cloned, currentPath);
+      });
+  
+      wasUpdated = true;
+    });
+  
+    if (wasUpdated) {
+      return root;
+    }
+  
+    return state;
+  }
+  
+  function updatePath(obj, parent, parentKey) {
+    if (isPrimitive(obj)) {
+      return;
+    }
+  
+    const parentPath = pathMap.get(parent);
+  
+    if (!parentPath) {
+      return;
+    }
+  
+    const path = parent ? parentPath.concat(parentKey) : [];
+  
+    obj = unwrap(obj);
+  
+    pathMap.set(obj, path);
+  
+    if (Array.isArray(obj)) {
+      obj.forEach((item, index) => updatePath(item, obj, index));
+    } else {
+      Object.keys(obj).forEach((key) => updatePath(obj[key], obj, key));
+    }
+  }
+
+  function scheduleUpdate(obj) {
     if (!objectesToUpdate.size) {
       Promise.resolve().then(() => {
         const newRoot = clonePaths(root, objectesToUpdate);
@@ -126,8 +126,7 @@ export function createStore(root) {
         if (
           isPrimitive(value) ||
           typeof value === "function" ||
-          prop === "prototype" ||
-          prop === "constructor"
+          prop === "prototype"
         ) {
           return value;
         }
@@ -226,9 +225,12 @@ export function createStore(root) {
   return { store, subscriptions };
 }
 
-export const useSelector = (selector) => {
+export const useSelector = (selector, equalsFn = shallowEquals) => {
   const reportedSubscriptionsRef = useRef(null);
   const selectorRef = useRef(selector);
+  
+  const lastArgsRef = useRef();
+  const lastResultRef = useRef();
 
   selectorRef.current = selector;
 
@@ -242,11 +244,60 @@ export const useSelector = (selector) => {
     };
   }, []);
 
+  const memoize = useCallback((...args) => {
+    const fn = args.pop();
+
+    if (typeof fn !== "function") {
+      return fn;
+    }
+    
+    if (shallowEquals(args, lastArgsRef.current)) {
+      return lastResultRef.current;
+    }
+    
+    lastArgsRef.current = args;
+    
+    const result = fn(...args);
+
+    if (equalsFn(result, lastResultRef.current)) {
+      return lastResultRef.current;
+    }
+
+    return result 
+  }, []);
+
   const reportedSelector = useCallback(() => {
-    const result = selectorRef.current();
+    const result = selectorRef.current(memoize);
     reportedSubscriptionsRef.current = reportedSubscriptions;
     return result;
   }, []);
 
   return useSyncExternalStore(subscriber, reportedSelector);
 };
+
+export const shallowEquals = (a, b) => {
+  if (a === b) {
+    return true;
+  }
+
+  if (isPrimitive(a) || isPrimitive(b)) {
+    return false;
+  }
+
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) {
+      return false;
+    }
+
+    return a.every((item, index) => item === b[index]);
+  }
+
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+
+  if (aKeys.length !== bKeys.length) {
+    return false;
+  }
+
+  return aKeys.every((key) => a[key] === b[key]);
+}
