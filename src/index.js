@@ -26,62 +26,62 @@ export function createStore(root) {
   function clonePaths(state, objectesToUpdate) {
     const clones = new Map();
     const root = clone(state);
-  
+
     let wasUpdated = false;
-  
+
     objectesToUpdate.forEach((obj) => {
       const path = pathMap.get(obj);
-  
+
       let finalObj = path.reduce(
         (acc, key) => (isPrimitive(acc) ? acc : acc[key]),
         state
       );
-  
+
       if (unwrap(finalObj) !== obj) {
         return;
       }
-  
+
       let parent = root;
-  
+
       path.forEach((key) => {
         const obj = parent[key];
         const currentPath = pathMap.get(obj);
         const cloned = clones.get(obj) || clone(obj);
-  
+
         parent[key] = cloned;
         parent = cloned;
-  
+
         clones.set(obj, cloned);
         pathMap.set(cloned, currentPath);
       });
-  
+
       wasUpdated = true;
     });
-  
+
     if (wasUpdated) {
       return root;
     }
-  
+
     return state;
   }
-  
+
   function updatePath(obj, parent, parentKey) {
     if (isPrimitive(obj)) {
       return;
     }
-  
+
     const parentPath = pathMap.get(parent);
-  
+
     if (!parentPath) {
       return;
     }
-  
+
     const path = parent ? parentPath.concat(parentKey) : [];
-  
+
     obj = unwrap(obj);
-  
+
     pathMap.set(obj, path);
-  
+
     if (Array.isArray(obj)) {
       obj.forEach((item, index) => updatePath(item, obj, index));
     } else {
@@ -98,7 +98,7 @@ export function createStore(root) {
           root = newRoot;
           subscriptions.forEach((cb) => cb(newRoot));
         }
-        
+
         objectesToUpdate.clear();
       });
     }
@@ -225,10 +225,10 @@ export function createStore(root) {
   return { store, subscriptions };
 }
 
-export const useSelector = (selector, equalsFn = shallowEquals) => {
+export const useSelector = (selector, equalsFn = Object.is) => {
   const reportedSubscriptionsRef = useRef(null);
   const selectorRef = useRef(selector);
-  
+
   const lastArgsRef = useRef();
   const lastResultRef = useRef();
 
@@ -248,32 +248,42 @@ export const useSelector = (selector, equalsFn = shallowEquals) => {
     const fn = args.pop();
 
     if (typeof fn !== "function") {
-      return fn;
+      throw new Error("Last memo argument must be a function");
     }
-    
+
     if (shallowEquals(args, lastArgsRef.current)) {
       return lastResultRef.current;
     }
-    
+
     lastArgsRef.current = args;
-    
+
     const result = fn(...args);
+
+    return result;
+  }, []);
+
+  const reportedSelector = useCallback(() => {
+    const result = selectorRef.current(memoize);
+
+    reportedSubscriptionsRef.current = reportedSubscriptions;
 
     if (equalsFn(result, lastResultRef.current)) {
       return lastResultRef.current;
     }
 
-    return result 
-  }, []);
+    lastResultRef.current = result;
 
-  const reportedSelector = useCallback(() => {
-    const result = selectorRef.current(memoize);
-    reportedSubscriptionsRef.current = reportedSubscriptions;
     return result;
   }, []);
 
   return useSyncExternalStore(subscriber, reportedSelector);
 };
+
+function isObject(value) {
+  const prototype = Object.getPrototypeOf(value);
+
+  return prototype === Object.prototype || prototype === null;
+}
 
 export const shallowEquals = (a, b) => {
   if (a === b) {
@@ -292,12 +302,16 @@ export const shallowEquals = (a, b) => {
     return a.every((item, index) => item === b[index]);
   }
 
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
+  if (isObject(a) && isObject(b)) {
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
 
-  if (aKeys.length !== bKeys.length) {
-    return false;
+    if (aKeys.length !== bKeys.length) {
+      return false;
+    }
+
+    return aKeys.every((key) => a[key] === b[key]);
   }
 
-  return aKeys.every((key) => a[key] === b[key]);
+  return false;
 }
