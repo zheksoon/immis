@@ -265,9 +265,11 @@ export const useSelector = (selector, equalsFn = Object.is) => {
   const reportedSelector = useCallback(() => {
     const result = selectorRef.current(memoize);
 
+    const executedBefore = !!reportedSubscriptionsRef.current;
+
     reportedSubscriptionsRef.current = reportedSubscriptions;
 
-    if (equalsFn(result, lastResultRef.current)) {
+    if (executedBefore && equalsFn(result, lastResultRef.current)) {
       return lastResultRef.current;
     }
 

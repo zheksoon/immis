@@ -13,7 +13,7 @@
   "module": "./dist/index.module.js",
   "unpkg": "./dist/index.umd.js",
   "scripts": {
-    "build": "microbundle",
+    "build": "microbundle --no-generateTypes",
     "dev": "microbundle watch"
   },
   "devDependencies": {

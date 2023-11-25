@@ -1,6 +1,17 @@
-export function createStore(root: any): {
-    store: {};
-    subscriptions: Set<any>;
+type StoreSubscriber<T> = (store: T) => void;
+
+export declare function createStore<T>(root: T): {
+  store: T;
+  subscriptions: Set<StoreSubscriber<T>>;
 };
-export function useSelector(selector: any, equalsFn?: (a: any, b: any) => boolean): any;
-export function shallowEquals(a: any, b: any): boolean;
+
+export declare function useSelector<Result>(
+  selector: (
+    memo: <Args extends any[], Combinator extends (...args: Args) => any>(
+      ...args: [...Args, Combinator]
+    ) => ReturnType<Combinator>
+  ) => Result,
+  equalsFn?: (a: Result, b: Result) => boolean
+): Result;
+
+export declare function shallowEquals(a: any, b: any): boolean;
